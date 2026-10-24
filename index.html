@@ -221,7 +221,7 @@
             }
         }
 
-       const BACKEND_URL = "https://221ecf14b6ffeb.lhr.life";
+        const BACKEND_URL = "https://9d44033e4d8606.lhr.life";
         const audio = new Audio();
         let isPlaying = false;
         let currentTrack = null;
@@ -285,47 +285,35 @@
             `).join('');
         }
 
-        async function selectAndPlayTrack(title, artist, cover, query) {
-            const statusEl = document.getElementById('searchStatus');
-            statusEl.innerText = `⏳ Загружаем «${title}» с ПК...`;
+       async function selectAndPlayTrack(title, artist, cover, query) {
+    const statusEl = document.getElementById('searchStatus');
+    statusEl.innerText = `⏳ Запуск «${title}»...`;
 
-            currentTrack = { title, artist, cover, streamUrl: '' };
-            updatePlayerUI();
+    currentTrack = { title, artist, cover, streamUrl: '' };
+    updatePlayerUI();
 
-            try {
-                const res = await fetch(`${BACKEND_URL}/api/play?query=${encodeURIComponent(query)}`, {
-                    headers: { "Bypass-Tunnel-Reminder": "true" }
-                });
-                const data = await res.json();
+    try {
+        // Получаем ссылку на аудио от бэкенда
+        const res = await fetch(`${BACKEND_URL}/api/play?query=${encodeURIComponent(query)}`);
+        const data = await res.json();
 
-                if (data.status === "success") {
-                    statusEl.innerText = "🚀 Скачиваем аудиопоток...";
-                    const fullAudioUrl = `${BACKEND_URL}${data.audio_url}`;
-                    
-                    // Скачиваем через fetch с заголовком обхода localtunnel, чтобы обойти блокировку
-                    const audioRes = await fetch(fullAudioUrl, {
-                        headers: { "Bypass-Tunnel-Reminder": "true" }
-                    });
-                    const audioBlob = await audioRes.blob();
-                    const blobUrl = URL.createObjectURL(audioBlob);
-
-                    currentTrack.streamUrl = blobUrl;
-
-                    statusEl.innerText = "🎵 Трек готов!";
-                    audio.src = blobUrl;
-                    audio.play();
-                    isPlaying = true;
-                    updatePlayerUI();
-
-                    saveToRecent(currentTrack);
-                } else {
-                    statusEl.innerText = "❌ Не удалось скачать трек";
-                }
-            } catch (e) {
-                console.error(e);
-                statusEl.innerText = "❌ Ошибка загрузки с сервера";
-            }
+        if (data.status === "success" && data.audio_url) {
+            statusEl.innerText = `🎵 Стриминг запущен`;
+            
+            const audioPlayer = document.getElementById('audio-element');
+            
+            // Направляем прямую ссылку на трек через наш новый бэкенд-поток (/api/stream)
+            audioPlayer.src = `${BACKEND_URL}/api/stream?url=${encodeURIComponent(data.audio_url)}`;
+            
+            audioPlayer.play().catch(e => console.log("Ошибка воспроизведения:", e));
+        } else {
+            statusEl.innerText = `❌ Трек не найден`;
         }
+    } catch (e) {
+        console.error(e);
+        statusEl.innerText = `❌ Ошибка соединения с ПК`;
+    }
+}
 
         function togglePlay() {
             if (!currentTrack || !currentTrack.streamUrl) return;
