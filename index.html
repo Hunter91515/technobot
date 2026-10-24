@@ -1,454 +1,399 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>TechnoBot - Technopark Music Player</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+import os
+import sys
+import time
+import json
+import re
+import threading
+import subprocess
+import requests
+import logging
+from datetime import datetime
+from flask import Flask, request, jsonify, send_from_directory, make_response, Response, stream_with_context
+from flask_cors import CORS
 
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        tp: {
-                            bg: '#0F1013',
-                            surface: '#17191E',
-                            card: '#1F222A',
-                            border: '#2E323D',
-                            orange: '#FF5500',
-                            orangeHover: '#FF6A1A',
-                            textMuted: '#8E95A5',
-                        }
-                    },
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                        mono: ['JetBrains Mono', 'monospace'],
-                    }
+# Настройка логов для отображения в CMD
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+
+app = Flask(__name__)
+# Настраиваем CORS корректно для всех путей и доменов
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+bot_instance = None
+bot_instance = None
+
+# 🎵 [FLASK API] Стриминг трека на лету (без сохранения на диск)
+@app.route('/api/stream')
+def stream_audio():
+    audio_url = request.args.get('url')
+    if not audio_url:
+        return "Missing URL", 400
+
+    def generate():
+        # Запрашиваем аудиопоток внешнего источника по частям
+        with requests.get(audio_url, stream=True) as r:
+            r.raise_for_status()
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+
+    # Возвращаем поток с правильным медиа-типом для музыки
+    return Response(stream_with_context(generate()), content_type="audio/mpeg")
+
+# 🔍 [FLASK API] Быстрый инлайн-поиск вариантов треков (для Mini App)
+@app.route('/api/search_suggestions', methods=['GET'])
+def search_suggestions():
+    query = request.args.get('query', '').strip()
+    if not query or len(query) < 2:
+        return jsonify([])
+    try:
+        r = requests.get("https://itunes.apple.com/search", params={
+            "term": query, 
+            "media": "music", 
+            "entity": "song", 
+            "limit": 10
+        }, timeout=5).json()
+        
+        results = []
+        for t in r.get("results", []):
+            artwork = t.get("artworkUrl100", "").replace("100x100bb", "600x600bb")
+            results.append({
+                "id": str(t.get("trackId")),
+                "title": t.get("trackName"),
+                "artist": t.get("artistName"),
+                "album": t.get("collectionName"),
+                "cover": artwork,
+                "query": f"{t.get('artistName')} - {t.get('trackName')}"
+            })
+        return jsonify(results)
+    except Exception as e:
+        logging.error(f"❌ Ошибка инлайн поиска для WebApp: {e}")
+        return jsonify([])
+
+# 🎧 [FLASK API] Запрос на скачивание и отдачу трека для Mini App
+@app.route('/api/play', methods=['GET'])
+def api_play():
+    query = request.args.get('query', '').strip()
+    if not query:
+        return jsonify({"error": "Пустой запрос"}), 400
+    
+    logging.info(f"🌐 WEB ЗАПРОС НА ТРЕК: {query}")
+    
+    path = bot_instance.download_audio(query)
+    if path and os.path.exists(path):
+        filename = os.path.basename(path)
+        return jsonify({
+            "status": "success",
+            "title": query,
+            "audio_url": f"/music/{filename}"
+        })
+    
+    return jsonify({"status": "error", "message": "Трек не найден"}), 404
+
+# 📂 [FLASK API] Раздача аудиофайлов прямо из локальной папки
+@app.route('/music/<filename>', methods=['GET'])
+def serve_music(filename):
+    response = make_response(send_from_directory(bot_instance.MUSIC_DIR, filename))
+    response.headers['Bypass-Tunnel-Reminder'] = 'true'
+    return response
+
+
+class TechnoBot:
+    def __init__(self):
+        global bot_instance
+        bot_instance = self
+
+        self.TOKEN = "8908103074:AAFuspl0m4xfByplNHnl2CenF9Z2D4RTe8k"
+        self.BOT_USERNAME = "TechnoParkNational_bot" 
+        self.ADMIN_ID = 6363063539  # Твой ID
+        
+        self.BASE_URL = f"https://api.telegram.org/bot{self.TOKEN}/"
+        self.FILE_URL = f"https://api.telegram.org/file/bot{self.TOKEN}/"
+        
+        self.BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        self.MUSIC_DIR = os.path.join(self.BASE_DIR, "music_storage")
+        self.FFMPEG_EXE = os.path.join(self.BASE_DIR, "ffmpeg.exe")
+        
+        self.DB_PATHS = {
+            "playlists": os.path.join(self.BASE_DIR, "db_playlists.json"),
+            "cache": os.path.join(self.BASE_DIR, "db_cache.json"),
+            "stats": os.path.join(self.BASE_DIR, "db_stats.json"),
+            "users": os.path.join(self.BASE_DIR, "db_users.json")
+        }
+        
+        self._init_system()
+
+    def _init_system(self):
+        if not os.path.exists(self.MUSIC_DIR):
+            os.makedirs(self.MUSIC_DIR)
+        for path in self.DB_PATHS.values():
+            if not os.path.exists(path):
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({}, f)
+        logging.info("Система TechnoBot запущена и готова к мониторингу.")
+
+    def _load_db(self, key):
+        try:
+            with open(self.DB_PATHS[key], "r", encoding="utf-8") as f:
+                return json.load(f)
+        except: return {}
+
+    def _save_db(self, key, data):
+        with open(self.DB_PATHS[key], "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+    def _register_user(self, uid, username):
+        db = self._load_db("users")
+        sid = str(uid)
+        if sid not in db:
+            db[sid] = {"name": username, "first_seen": str(datetime.now())}
+            self._save_db("users", db)
+            logging.info(f"🆕 НОВЫЙ ПОЛЬЗОВАТЕЛЬ: {username} (ID: {uid})")
+
+    def download_audio(self, query):
+        logging.info(f"🛰 ЗАГРУЗКА ТРЕКА: {query}")
+        timestamp = int(time.time())
+        file_id = f"track_{timestamp}"
+        output_template = os.path.join(self.MUSIC_DIR, file_id)
+        final_file = f"{output_template}.mp3"
+
+        cmd = [
+            sys.executable, "-m", "yt_dlp",
+            "--cookies", "d:\\Software\\cookies.txt",
+            f"ytsearch1:{query}",
+            "--extract-audio", "--audio-format", "mp3", "--audio-quality", "0",
+            "--embed-thumbnail", "--add-metadata",
+            "-o", output_template + ".%(ext)s",
+            "--ffmpeg-location", self.BASE_DIR,
+            "--no-playlist", "--quiet"
+        ]
+
+
+
+        try:
+            subprocess.run(cmd, check=True)
+            if os.path.exists(final_file):
+                logging.info(f"✅ УСПЕШНО СКАЧАНО: {query}")
+                return final_file
+            return None
+        except Exception as e:
+            logging.error(f"❌ ОШИБКА YT-DLP: {e}")
+            return None
+
+    def handle_updates(self, update):
+        # [1] INLINE ПОИСК В ТЕЛЕГРАМ
+        if "inline_query" in update:
+            iq = update["inline_query"]
+            q = iq["query"].strip()
+            if not q: return
+            results = []
+            try:
+                r = requests.get("https://itunes.apple.com/search", params={"term": q, "media": "music", "limit": 20}).json()
+                for i, t in enumerate(r.get("results", [])):
+                    artwork = t.get("artworkUrl100", "").replace("100x100bb", "1000x1000bb")
+                    name = f"{t.get('artistName')} - {t.get('trackName')}"
+                    results.append({
+                        "type": "article", "id": f"in_{i}_{time.time()}",
+                        "title": name, "description": f"💿 {t.get('collectionName')}",
+                        "thumb_url": artwork,
+                        "input_message_content": {"message_text": f"/search {name}"}
+                    })
+            except: pass
+            requests.post(self.BASE_URL + "answerInlineQuery", json={"inline_query_id": iq["id"], "results": results})
+
+        # [2] ОБРАБОТКА СООБЩЕНИЙ В ЧАТЕ
+        if "message" in update:
+            msg = update["message"]; cid = msg["chat"]["id"]; uid = str(msg["from"]["id"]); text = msg.get("text", "")
+            user_tag = f"@{msg['from'].get('username', 'NoName')}"
+            
+            self._register_user(uid, user_tag)
+            if text:
+                logging.info(f"👤 ЮЗЕР {user_tag} ({uid}) ПИШЕТ: {text}")
+
+            # --- ГЛАВНОЕ МЕНЮ И КНОПКА WEB APP ---
+            if text in ["/start", "🔙 Главное меню"]:
+                welcome = (
+                    "⚙️ **TECHNOBOT // TECHNOPARK EDITION** ⚙️\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "🎧 *Музыкальный хай-тек терминал в Telegram!*\n\n"
+                    "🚀 **ФУНКЦИИ:**\n"
+                    "┣ 🌐 **MINI APP:** Нажми кнопку ниже для Spotify-интерфейса.\n"
+                    "┣ 🔍 **ПОИСК:** Напиши название в чат.\n"
+                    "┣ 🖼 **ИНЛАЙН:** Вводи `@{username} ` для HQ-поиска.\n"
+                    "┗ 🏆 **ТОП-10:** Команда `/top` — хиты системы."
+                ).format(username=self.BOT_USERNAME)
+                
+                kb = {
+                    "keyboard": [
+                        [{"text": "🔥 ТОП-10"}, {"text": "📜 МОЙ ПЛЕЙЛИСТ"}], 
+                        [{"text": "🔍 ИНСТРУКЦИЯ"}, {"text": "🔙 Главное меню"}]
+                    ], 
+                    "resize_keyboard": True
                 }
-            }
-        }
-    </script>
-
-    <style>
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: #0F1013; }
-        ::-webkit-scrollbar-thumb { background: #2E323D; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #FF5500; }
-        .glass-panel { background: rgba(23, 25, 30, 0.92); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
-        input[type="range"] { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
-        input[type="range"]::-webkit-slider-runnable-track { background: #2E323D; height: 4px; border-radius: 2px; }
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; height: 12px; width: 12px; border-radius: 50%; background: #FF5500; margin-top: -4px; box-shadow: 0 0 8px rgba(255, 85, 0, 0.8); }
-    </style>
-</head>
-<body class="bg-tp-bg text-white font-sans antialiased select-none overflow-hidden h-screen flex flex-col justify-between">
-
-    <!-- HEADER -->
-    <header class="h-14 px-4 pt-2 flex items-center justify-between border-b border-tp-border/40 bg-tp-surface/60 backdrop-blur-md z-30">
-        <div class="flex items-center space-x-2">
-            <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-tp-orange to-orange-400 flex items-center justify-center font-black text-black text-xs shadow-lg shadow-tp-orange/30">
-                <i class="fa-solid fa-robot"></i>
-            </div>
-            <div>
-                <h1 class="text-xs font-extrabold tracking-wider text-white uppercase font-mono flex items-center gap-1.5">
-                    TECHNOBOT <span class="bg-tp-orange/20 text-tp-orange px-1.5 py-0.5 rounded text-[9px] border border-tp-orange/30">v26.3</span>
-                </h1>
-                <p class="text-[10px] text-tp-textMuted">Spotify-Style Telegram Engine</p>
-            </div>
-        </div>
-        <div id="userInfo" class="text-xs font-medium bg-tp-card px-2.5 py-1.5 rounded-full border border-tp-border text-tp-textMuted">
-            <i class="fa-brands fa-telegram text-tp-orange mr-1"></i> Пользователь
-        </div>
-    </header>
-
-    <!-- MAIN SCROLL AREA -->
-    <main id="mainContainer" class="flex-1 overflow-y-auto pb-32 px-4 pt-4 space-y-6">
-
-        <!-- SCREEN 1: HOME -->
-        <section id="screen-home" class="space-y-6">
-            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-tp-card via-tp-surface to-black p-5 border border-tp-border">
-                <span class="text-[10px] uppercase font-mono tracking-widest text-tp-orange bg-tp-orange/10 px-2 py-0.5 rounded border border-tp-orange/20">Официальный Стриминг</span>
-                <h2 class="text-xl font-bold mt-1">TechnoBot Music</h2>
-                <p class="text-xs text-tp-textMuted mt-1">Ищи треки как в Telegram Inline и слушай прямо в плеере.</p>
-                <button onclick="switchTab('search')" class="mt-3 bg-tp-orange hover:bg-tp-orangeHover text-black font-semibold text-xs px-4 py-2 rounded-xl flex items-center gap-2 transition shadow-md shadow-tp-orange/30">
-                    <i class="fa-solid fa-magnifying-glass text-xs"></i> Найти трек
-                </button>
-            </div>
-
-            <div class="space-y-3">
-                <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-white flex items-center gap-2">
-                        <i class="fa-solid fa-clock-rotate-left text-tp-orange text-xs"></i> Недавно прослушанные
-                    </h3>
-                </div>
-                <div id="recentTracksList" class="space-y-2">
-                    <p class="text-xs text-tp-textMuted text-center py-4">История пуста. Найдите песню через поиск!</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- SCREEN 2: SEARCH (ИНЛАЙН ПОИСК) -->
-        <section id="screen-search" class="hidden space-y-4">
-            <div class="relative">
-                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-tp-textMuted text-sm"></i>
-                <input type="text" id="searchInput" oninput="onSearchInput(this.value)" placeholder="Введите название артиста или трека..." 
-                       class="w-full bg-tp-card border border-tp-border focus:border-tp-orange text-white text-xs rounded-xl pl-10 pr-10 py-3 outline-none transition placeholder-tp-textMuted">
-                <button id="clearSearchBtn" onclick="clearSearch()" class="hidden absolute right-3 top-3 text-tp-textMuted hover:text-white">
-                    <i class="fa-solid fa-xmark text-sm"></i>
-                </button>
-            </div>
-
-            <div id="searchStatus" class="text-xs text-tp-orange font-mono"></div>
-
-            <div class="space-y-2">
-                <h3 class="text-xs font-mono uppercase text-tp-textMuted tracking-wider">Варианты поиска</h3>
-                <div id="searchResultsList" class="space-y-2">
-                    <p class="text-xs text-tp-textMuted text-center py-8">Начните вводить название песни...</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- SCREEN 3: LIBRARY (ИЗБРАННОЕ) -->
-        <section id="screen-library" class="hidden space-y-4">
-            <h2 class="text-lg font-bold">Мое Избранное</h2>
-            <div id="libraryContent" class="space-y-2">
-                <p class="text-xs text-tp-textMuted text-center py-8">Ваш список любимых треков пуст</p>
-            </div>
-        </section>
-
-    </main>
-
-    <!-- MINI PLAYER -->
-    <div id="miniPlayer" class="fixed bottom-16 left-2 right-2 glass-panel border border-tp-border rounded-2xl p-2.5 flex items-center justify-between shadow-2xl z-40">
-        <div onclick="expandPlayer()" class="flex items-center space-x-3 flex-1 min-w-0 cursor-pointer">
-            <img id="miniCover" src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80" 
-                 class="w-11 h-11 object-cover rounded-xl border border-tp-border shrink-0">
-            <div class="min-w-0 flex-1">
-                <p id="miniTitle" class="text-xs font-bold text-white truncate">Выберите трек</p>
-                <p id="miniArtist" class="text-[11px] text-tp-textMuted truncate">TechnoBot Engine</p>
-            </div>
-        </div>
-
-        <div class="flex items-center space-x-2 pl-2">
-            <button onclick="toggleLikeCurrentTrack()" class="text-tp-textMuted hover:text-tp-orange p-2">
-                <i id="miniLikeBtn" class="fa-regular fa-heart text-base"></i>
-            </button>
-            <button onclick="togglePlay()" class="w-9 h-9 rounded-full bg-tp-orange text-black flex items-center justify-center shadow-lg shadow-tp-orange/20 hover:scale-105 active:scale-95 transition">
-                <i id="miniPlayIcon" class="fa-solid fa-play text-xs ml-0.5"></i>
-            </button>
-        </div>
-
-        <div class="absolute top-0 left-3 right-3 h-[2px] bg-tp-border rounded-full overflow-hidden">
-            <div id="miniProgressBar" class="h-full bg-tp-orange w-0 transition-all duration-300"></div>
-        </div>
-    </div>
-
-    <!-- FULL PLAYER -->
-    <div id="fullPlayer" class="fixed inset-0 bg-tp-bg/95 backdrop-blur-2xl z-50 flex flex-col justify-between p-6 transition-transform duration-300 transform translate-y-full">
-        <div class="flex items-center justify-between">
-            <button onclick="collapsePlayer()" class="w-10 h-10 rounded-full bg-tp-card border border-tp-border flex items-center justify-center text-tp-textMuted hover:text-white">
-                <i class="fa-solid fa-chevron-down"></i>
-            </button>
-            <div class="text-center">
-                <p class="text-[10px] font-mono text-tp-orange uppercase tracking-widest">Сейчас играет</p>
-                <p class="text-xs font-semibold text-tp-textMuted">TechnoBot Audio Stream</p>
-            </div>
-            <div class="w-10"></div>
-        </div>
-
-        <div class="my-auto flex flex-col items-center justify-center py-6">
-            <div class="relative w-64 h-64 sm:w-72 sm:h-72">
-                <div class="absolute inset-0 bg-tp-orange/20 rounded-full blur-2xl"></div>
-                <img id="fullCover" src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80" 
-                     class="w-full h-full object-cover rounded-2xl border-2 border-tp-border shadow-2xl relative z-10">
-            </div>
-        </div>
-
-        <div class="space-y-6">
-            <div class="flex items-center justify-between">
-                <div class="min-w-0 flex-1 pr-4">
-                    <h2 id="fullTitle" class="text-xl font-extrabold text-white truncate">Выберите трек</h2>
-                    <p id="fullArtist" class="text-sm text-tp-textMuted truncate mt-0.5">TechnoBot Stream</p>
-                </div>
-                <button onclick="toggleLikeCurrentTrack()" class="w-12 h-12 rounded-full bg-tp-card border border-tp-border flex items-center justify-center text-tp-textMuted hover:text-tp-orange transition">
-                    <i id="fullLikeBtn" class="fa-regular fa-heart text-xl"></i>
-                </button>
-            </div>
-
-            <div class="space-y-1.5">
-                <input type="range" id="fullSeek" value="0" min="0" max="100" class="w-full" oninput="seekAudio(this.value)">
-                <div class="flex justify-between text-[11px] font-mono text-tp-textMuted">
-                    <span id="currentTimeText">0:00</span>
-                    <span id="durationTimeText">0:00</span>
-                </div>
-            </div>
-
-            <div class="flex items-center justify-center pt-2">
-                <button onclick="togglePlay()" class="w-16 h-16 rounded-full bg-tp-orange text-black flex items-center justify-center shadow-xl shadow-tp-orange/30 hover:scale-105 active:scale-95 transition">
-                    <i id="fullPlayIcon" class="fa-solid fa-play text-xl ml-1"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- BOTTOM NAVBAR -->
-    <nav class="h-16 bg-tp-surface border-t border-tp-border flex items-center justify-around px-2 z-40 relative">
-        <button onclick="switchTab('home')" id="nav-home" class="nav-item flex flex-col items-center justify-center w-16 py-1 text-tp-orange">
-            <i class="fa-solid fa-house text-lg"></i>
-            <span class="text-[10px] mt-1 font-medium">Главная</span>
-        </button>
-        <button onclick="switchTab('search')" id="nav-search" class="nav-item flex flex-col items-center justify-center w-16 py-1 text-tp-textMuted hover:text-white">
-            <i class="fa-solid fa-magnifying-glass text-lg"></i>
-            <span class="text-[10px] mt-1 font-medium">Поиск</span>
-        </button>
-        <button onclick="switchTab('library')" id="nav-library" class="nav-item flex flex-col items-center justify-center w-16 py-1 text-tp-textMuted hover:text-white">
-            <i class="fa-solid fa-heart text-lg"></i>
-            <span class="text-[10px] mt-1 font-medium">Избранное</span>
-        </button>
-    </nav>
-
-    <!-- SCRIPT LOGIC -->
-    <script>
-        const tg = window.Telegram ? window.Telegram.WebApp : null;
-        if (tg) {
-            tg.ready();
-            tg.expand();
-            if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-                document.getElementById('userInfo').innerHTML = `<i class="fa-brands fa-telegram text-tp-orange mr-1"></i> ${tg.initDataUnsafe.user.first_name || 'Пользователь'}`;
-            }
-        }
-
-        const BACKEND_URL = "https://riding-pad-airfare-donated.trycloudflare.com";
-        const audio = new Audio();
-        let isPlaying = false;
-        let currentTrack = null;
-        let searchTimeout = null;
-
-        let favorites = JSON.parse(localStorage.getItem('tp_favorites') || '[]');
-        let recentTracks = JSON.parse(localStorage.getItem('tp_recent') || '[]');
-
-        window.addEventListener('DOMContentLoaded', () => {
-            renderRecent();
-            renderFavorites();
-
-            audio.addEventListener('timeupdate', updateProgress);
-            audio.addEventListener('ended', () => { isPlaying = false; updatePlayerUI(); });
-        });
-
-        function onSearchInput(val) {
-            document.getElementById('clearSearchBtn').classList.toggle('hidden', !val);
-            clearTimeout(searchTimeout);
-
-            if (!val.trim()) {
-                document.getElementById('searchResultsList').innerHTML = `<p class="text-xs text-tp-textMuted text-center py-8">Начните вводить название песни...</p>`;
-                return;
-            }
-
-            document.getElementById('searchStatus').innerText = "🔍 Поиск вариантов...";
-
-            searchTimeout = setTimeout(async () => {
-                try {
-                    const res = await fetch(`${BACKEND_URL}/api/search_suggestions?query=${encodeURIComponent(val)}`, {
-                        headers: { "Bypass-Tunnel-Reminder": "true" }
-                    });
-                    const data = await res.json();
-                    document.getElementById('searchStatus').innerText = "";
-                    renderSearchSuggestions(data);
-                } catch (e) {
-                    document.getElementById('searchStatus').innerText = "❌ Ошибка соединения с ПК";
+                
+                requests.post(self.BASE_URL + "sendMessage", json={
+                    "chat_id": cid, 
+                    "text": welcome, 
+                    "parse_mode": "Markdown", 
+                    "reply_markup": kb
+                })
+                
+                webapp_keyboard = {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "🎧 Открыть TechnoBot App",
+                                "web_app": {"url": "https://hunter91515.github.io/technobot/index.html"}
+                            }
+                        ],
+                        [
+                            {"text": "🖼 HQ ПОИСК С ОБЛОЖКАМИ", "switch_inline_query_current_chat": ""}
+                        ]
+                    ]
                 }
-            }, 300);
-        }
+                
+                requests.post(self.BASE_URL + "sendMessage", json={
+                    "chat_id": cid, 
+                    "text": "👇 **Запусти графический плеер в стиле Технопарка:**", 
+                    "parse_mode": "Markdown", 
+                    "reply_markup": webapp_keyboard
+                })
 
-        function renderSearchSuggestions(tracks) {
-            const list = document.getElementById('searchResultsList');
-            if (!tracks || tracks.length === 0) {
-                list.innerHTML = `<p class="text-xs text-tp-textMuted text-center py-6">Ничего не найдено</p>`;
-                return;
-            }
+            # --- ИНСТРУКЦИЯ ---
+            elif text == "🔍 ИНСТРУКЦИЯ":
+                instr = (
+                    "📖 **ПОЛНОЕ РУКОВОДСТВО**\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "1️⃣ **Как пользоваться Mini App?**\n"
+                    "Нажми кнопку «Открыть TechnoBot App», чтобы запустить Spotify-интерфейс в стиле технопарка.\n\n"
+                    "2️⃣ **Как искать музыку через чат?**\n"
+                    "Просто напиши название песни или артиста в чат. Бот найдет, скачает и пришлет файл.\n\n"
+                    "3️⃣ **Как пользоваться Облаком?**\n"
+                    "Ответь на присланный ботом трек командой `/add`, и он сохранится в твоей медиатеке.\n\n"
+                    "4️⃣ **Как обрезать трек?**\n"
+                    "Ответь на аудио-сообщение командой: `/trim 01:00 01:30`.\n\n"
+                    "5️⃣ **Инлайн поиск:**\n"
+                    "В любом чате введи `@{username} ` и название песни."
+                ).format(username=self.BOT_USERNAME)
+                requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": instr, "parse_mode": "Markdown"})
 
-            list.innerHTML = tracks.map(t => `
-                <div onclick="selectAndPlayTrack('${t.title.replace(/'/g, "")}', '${t.artist.replace(/'/g, "")}', '${t.cover}', '${t.query.replace(/'/g, "")}')" 
-                     class="flex items-center justify-between p-2.5 bg-tp-card rounded-xl border border-tp-border/40 hover:border-tp-orange/40 transition cursor-pointer group">
-                    <div class="flex items-center space-x-3 min-w-0">
-                        <img src="${t.cover}" class="w-11 h-11 object-cover rounded-lg border border-tp-border shrink-0">
-                        <div class="min-w-0">
-                            <p class="text-xs font-bold text-white truncate group-hover:text-tp-orange transition">${t.title}</p>
-                            <p class="text-[11px] text-tp-textMuted truncate">${t.artist}</p>
-                        </div>
-                    </div>
-                    <i class="fa-solid fa-play text-xs text-tp-orange p-2"></i>
-                </div>
-            `).join('');
-        }
+            # --- АДМИН-РАССЫЛКА ---
+            elif text.startswith("/broadcast") and int(uid) == self.ADMIN_ID:
+                bc_msg = text.replace("/broadcast", "").strip()
+                if bc_msg:
+                    users = self._load_db("users")
+                    count = 0
+                    logging.info(f"📢 ЗАПУСК РАССЫЛКИ ДЛЯ {len(users)} ЧЕЛОВЕК...")
+                    for u_id in users:
+                        try:
+                            r = requests.post(self.BASE_URL + "sendMessage", json={
+                                "chat_id": u_id, 
+                                "text": f"📢 **СООБЩЕНИЕ ОТ РАЗРАБОТЧИКА:**\n\n{bc_msg}",
+                                "parse_mode": "Markdown"
+                            })
+                            if r.status_code == 200: count += 1
+                            time.sleep(0.05)
+                        except: pass
+                    requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": f"✅ Рассылка завершена. Доставлено: {count} чел."})
 
-       async function selectAndPlayTrack(title, artist, cover, query) {
-    const statusEl = document.getElementById('searchStatus');
-    statusEl.innerText = `⏳ Запуск «${title}»...`;
+            # --- АДМИН-СТАТИСТИКА ---
+            elif text == "/stats" and int(uid) == self.ADMIN_ID:
+                u_db = self._load_db("users"); c_db = self._load_db("cache"); s_db = self._load_db("stats")
+                total = sum(s_db.values())
+                msg_s = f"📊 **МОНИТОРИНГ СИСТЕМЫ:**\n\n👤 Юзеров: {len(u_db)}\n💾 В кэше: {len(c_db)}\n📈 Всего поисков: {total}\n\nПоследнее действие: {datetime.now().strftime('%H:%M:%S')}"
+                requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": msg_s, "parse_mode": "Markdown"})
 
-    currentTrack = { title, artist, cover, streamUrl: '' };
-    updatePlayerUI();
+            # --- ОБЛАКО И НАРЕЗКА (Reply функции) ---
+            elif text == "/add" and "reply_to_message" in msg:
+                if "audio" in msg["reply_to_message"]:
+                    aud = msg["reply_to_message"]["audio"]
+                    name = f"{aud.get('performer', 'Art')} - {aud.get('title', 'Track')}"
+                    db = self._load_db("playlists"); db.setdefault(uid, []).append({"name": name, "file_id": aud["file_id"]}); self._save_db("playlists", db)
+                    requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": "✅ **Трек в твоём облаке!**", "parse_mode": "Markdown"})
+                else:
+                    requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": "❌ Ошибка: ответь на аудио!"})
 
-    try {
-        // Получаем ссылку на аудио от бэкенда
-        const res = await fetch(`${BACKEND_URL}/api/play?query=${encodeURIComponent(query)}`);
-        const data = await res.json();
+            elif text.startswith("/trim") and "reply_to_message" in msg:
+                try:
+                    parts = text.split(); start, end = parts[1], parts[2]; fid = msg["reply_to_message"]["audio"]["file_id"]
+                    f_info = requests.get(self.BASE_URL + "getFile", params={"file_id": fid}).json()
+                    output = os.path.join(self.MUSIC_DIR, f"trim_{int(time.time())}.mp3")
+                    logging.info(f"✂️ НАРЕЗКА ТРЕКА: {start} -> {end}")
+                    subprocess.run([self.FFMPEG_EXE, "-ss", start, "-to", end, "-i", f"{self.FILE_URL}{f_info['result']['file_path']}", "-c", "copy", output, "-y"], check=True)
+                    with open(output, "rb") as f: requests.post(self.BASE_URL + "sendAudio", data={"chat_id": cid}, files={"audio": f})
+                    os.remove(output)
+                except: requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": "❌ Ошибка! Пример: `/trim 00:10 00:30`"})
 
-        if (data.status === "success" && data.audio_url) {
-            statusEl.innerText = `🎵 Стриминг запущен`;
-            
-            const audioPlayer = document.getElementById('audio-element');
-            
-            // Направляем прямую ссылку на трек через наш новый бэкенд-поток (/api/stream)
-            audioPlayer.src = `${BACKEND_URL}/api/stream?url=${encodeURIComponent(data.audio_url)}`;
-            
-            audioPlayer.play().catch(e => console.log("Ошибка воспроизведения:", e));
-        } else {
-            statusEl.innerText = `❌ Трек не найден`;
-        }
-    } catch (e) {
-        console.error(e);
-        statusEl.innerText = `❌ Ошибка соединения с ПК`;
-    }
-}
+            # --- ТОП И ПЛЕЙЛИСТ ---
+            elif text in ["🔥 ТОП-10", "/top"]:
+                st = self._load_db("stats"); top = sorted(st.items(), key=lambda x: x[1], reverse=True)[:10]
+                res = "🏆 **ГЛОБАЛЬНЫЙ ЧАРТ:**\n\n"
+                for i, (n, c) in enumerate(top, 1): res += f"{i}. `{n}` — {c}🎧\n"
+                requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": res, "parse_mode": "Markdown"})
 
-        function togglePlay() {
-            if (!currentTrack || !currentTrack.streamUrl) return;
-            if (isPlaying) {
-                audio.pause();
-                isPlaying = false;
-            } else {
-                audio.play();
-                isPlaying = true;
-            }
-            updatePlayerUI();
-        }
+            elif text == "📜 МОЙ ПЛЕЙЛИСТ":
+                db = self._load_db("playlists"); u_pl = db.get(uid, [])
+                if not u_pl: requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": "☁️ Облако пусто."})
+                else:
+                    ikb = {"inline_keyboard": [[{"text": "🗑 Очистить облако", "callback_data": "clear_pl"}]]}
+                    for i, t in enumerate(u_pl[-15:]): ikb["inline_keyboard"].append([{"text": f"🎶 {t['name']}", "callback_data": f"play_{i}"}])
+                    requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": "📂 **Твоя медиатека:**", "reply_markup": ikb, "parse_mode": "Markdown"})
 
-        function updatePlayerUI() {
-            if (!currentTrack) return;
+            # --- ОБЫЧНЫЙ ПОИСК В ЧАТЕ ---
+            elif text and not text.startswith("/"):
+                query = text.strip()
+                st = self._load_db("stats"); st[query.lower()] = st.get(query.lower(), 0) + 1; self._save_db("stats", st)
+                cache = self._load_db("cache")
+                if query.lower() in cache:
+                    logging.info(f"⚡️ ВЫДАЧА ИЗ КЭША: {query}")
+                    requests.post(self.BASE_URL + "sendAudio", json={"chat_id": cid, "audio": cache[query.lower()]})
+                    return
+                requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": f"🛰 **Поиск трека:** `{query}`", "parse_mode": "Markdown"})
+                path = self.download_audio(query)
+                if path:
+                    with open(path, "rb") as f:
+                        r = requests.post(self.BASE_URL + "sendAudio", data={"chat_id": cid}, files={"audio": f}).json()
+                        if r.get("ok"):
+                            c = self._load_db("cache"); c[query.lower()] = r["result"]["audio"]["file_id"]; self._save_db("cache", c)
+                    os.remove(path)
+                else: requests.post(self.BASE_URL + "sendMessage", json={"chat_id": cid, "text": "💔 Трек не найден."})
 
-            document.getElementById('miniTitle').innerText = currentTrack.title;
-            document.getElementById('miniArtist').innerText = currentTrack.artist;
-            document.getElementById('miniCover').src = currentTrack.cover;
-            document.getElementById('miniPlayIcon').className = isPlaying ? "fa-solid fa-pause text-xs" : "fa-solid fa-play text-xs ml-0.5";
+            elif text.startswith("/search"):
+                q = text.replace("/search", "").strip(); msg['text'] = q; self.handle_updates({"message": msg})
 
-            document.getElementById('fullTitle').innerText = currentTrack.title;
-            document.getElementById('fullArtist').innerText = currentTrack.artist;
-            document.getElementById('fullCover').src = currentTrack.cover;
-            document.getElementById('fullPlayIcon').className = isPlaying ? "fa-solid fa-pause text-xl" : "fa-solid fa-play text-xl ml-1";
+        # [3] CALLBACKS ДЛЯ ИНЛАЙН-КНОПОК
+        if "callback_query" in update:
+            cb = update["callback_query"]; uid = str(cb["from"]["id"]); cid = cb["message"]["chat"]["id"]; data = cb["data"]
+            if data == "clear_pl":
+                db = self._load_db("playlists"); db[uid] = []; self._save_db("playlists", db)
+                requests.post(self.BASE_URL + "editMessageText", json={"chat_id": cid, "message_id": cb["message"]["message_id"], "text": "🧹 **Облако очищено!**"})
+            elif data.startswith("play_"):
+                idx = int(data.split("_")[1]); db = self._load_db("playlists")
+                if uid in db and idx < len(db[uid]):
+                    requests.post(self.BASE_URL + "sendAudio", json={"chat_id": cid, "audio": db[uid][idx]['file_id']})
+            requests.post(self.BASE_URL + "answerCallbackQuery", json={"callback_query_id": cb["id"]})
 
-            const isLiked = favorites.some(f => f.title === currentTrack.title && f.artist === currentTrack.artist);
-            document.getElementById('miniLikeBtn').className = isLiked ? "fa-solid fa-heart text-tp-orange" : "fa-regular fa-heart";
-            document.getElementById('fullLikeBtn').className = isLiked ? "fa-solid fa-heart text-tp-orange" : "fa-regular fa-heart";
-        }
+    def run_flask(self):
+        app.run(host="0.0.0.0", port=5000, threaded=True, use_reloader=False)
 
-        function toggleLikeCurrentTrack() {
-            if (!currentTrack) return;
-            const idx = favorites.findIndex(f => f.title === currentTrack.title && f.artist === currentTrack.artist);
-            if (idx >= 0) {
-                favorites.splice(idx, 1);
-            } else {
-                favorites.push(currentTrack);
-            }
-            localStorage.setItem('tp_favorites', JSON.stringify(favorites));
-            renderFavorites();
-            updatePlayerUI();
-        }
+    def start(self):
+        print(f"--- TECHNOBOT // TECHNOPARK EDITION STARTED ---")
+        
+        # Запускаем Flask в отдельном потоке
+        threading.Thread(target=self.run_flask, daemon=True).start()
+        logging.info("🌐 Веб-сервер Flask успешно запущен на порту 5000.")
 
-        function saveToRecent(track) {
-            recentTracks = recentTracks.filter(r => !(r.title === track.title && r.artist === track.artist));
-            recentTracks.unshift(track);
-            if (recentTracks.length > 15) recentTracks.pop();
-            localStorage.setItem('tp_recent', JSON.stringify(recentTracks));
-            renderRecent();
-        }
+        offset = 0
+        while True:
+            try:
+                res = requests.get(self.BASE_URL + "getUpdates", params={"offset": offset, "timeout": 20}).json()
+                for upd in res.get("result", []):
+                    offset = upd["update_id"] + 1
+                    threading.Thread(target=self.handle_updates, args=(upd,)).start()
+            except: time.sleep(1)
 
-        function renderRecent() {
-            const list = document.getElementById('recentTracksList');
-            if (!recentTracks.length) {
-                list.innerHTML = `<p class="text-xs text-tp-textMuted text-center py-4">История пуста. Найдите песню через поиск!</p>`;
-                return;
-            }
-            list.innerHTML = recentTracks.map(t => `
-                <div onclick="selectAndPlayTrack('${t.title.replace(/'/g, "")}', '${t.artist.replace(/'/g, "")}', '${t.cover}', '${t.artist} ${t.title}')" 
-                     class="flex items-center justify-between p-2.5 bg-tp-card rounded-xl border border-tp-border/40 hover:border-tp-orange/40 transition cursor-pointer">
-                    <div class="flex items-center space-x-3 min-w-0">
-                        <img src="${t.cover}" class="w-11 h-11 object-cover rounded-lg shrink-0">
-                        <div class="min-w-0">
-                            <p class="text-xs font-bold text-white truncate">${t.title}</p>
-                            <p class="text-[11px] text-tp-textMuted truncate">${t.artist}</p>
-                        </div>
-                    </div>
-                    <i class="fa-solid fa-play text-xs text-tp-orange p-2"></i>
-                </div>
-            `).join('');
-        }
-
-        function renderFavorites() {
-            const list = document.getElementById('libraryContent');
-            if (!favorites.length) {
-                list.innerHTML = `<p class="text-xs text-tp-textMuted text-center py-8">Ваш список любимых треков пуст</p>`;
-                return;
-            }
-            list.innerHTML = favorites.map(t => `
-                <div onclick="selectAndPlayTrack('${t.title.replace(/'/g, "")}', '${t.artist.replace(/'/g, "")}', '${t.cover}', '${t.artist} ${t.title}')" 
-                     class="flex items-center justify-between p-2.5 bg-tp-card rounded-xl border border-tp-border/40 hover:border-tp-orange/40 transition cursor-pointer">
-                    <div class="flex items-center space-x-3 min-w-0">
-                        <img src="${t.cover}" class="w-11 h-11 object-cover rounded-lg shrink-0">
-                        <div class="min-w-0">
-                            <p class="text-xs font-bold text-white truncate">${t.title}</p>
-                            <p class="text-[11px] text-tp-textMuted truncate">${t.artist}</p>
-                        </div>
-                    </div>
-                    <i class="fa-solid fa-heart text-xs text-tp-orange p-2"></i>
-                </div>
-            `).join('');
-        }
-
-        function updateProgress() {
-            if (!audio.duration) return;
-            const percentage = (audio.currentTime / audio.duration) * 100;
-            document.getElementById('miniProgressBar').style.width = `${percentage}%`;
-            document.getElementById('fullSeek').value = percentage;
-            document.getElementById('currentTimeText').innerText = formatTime(audio.currentTime);
-            document.getElementById('durationTimeText').innerText = formatTime(audio.duration);
-        }
-
-        function seekAudio(val) {
-            if (audio.duration) { audio.currentTime = (val / 100) * audio.duration; }
-        }
-
-        function formatTime(seconds) {
-            const min = Math.floor(seconds / 60);
-            const sec = Math.floor(seconds % 60);
-            return `${min}:${sec < 10 ? '0' : ''}${sec}`;
-        }
-
-        function clearSearch() {
-            document.getElementById('searchInput').value = '';
-            document.getElementById('searchStatus').innerText = '';
-            document.getElementById('searchResultsList').innerHTML = `<p class="text-xs text-tp-textMuted text-center py-8">Начните вводить название песни...</p>`;
-            document.getElementById('clearSearchBtn').classList.add('hidden');
-        }
-
-        function switchTab(tabId) {
-            ['home', 'search', 'library'].forEach(id => {
-                document.getElementById(`screen-${id}`).classList.add('hidden');
-                const navBtn = document.getElementById(`nav-${id}`);
-                navBtn.classList.remove('text-tp-orange');
-                navBtn.classList.add('text-tp-textMuted');
-            });
-            document.getElementById(`screen-${tabId}`).classList.remove('hidden');
-            const activeNav = document.getElementById(`nav-${tabId}`);
-            activeNav.classList.add('text-tp-orange');
-            activeNav.classList.remove('text-tp-textMuted');
-        }
-
-        function expandPlayer() { document.getElementById('fullPlayer').classList.remove('translate-y-full'); }
-        function collapsePlayer() { document.getElementById('fullPlayer').classList.add('translate-y-full'); }
-    </script>
-</body>
-</html>
+if __name__ == "__main__":
+    TechnoBot().start()
