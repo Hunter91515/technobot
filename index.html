@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TechnoBot - Technopark Music Player</title>
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Inter & JetBrains Mono Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        tp: {
+                            bg: '#0F1013',
+                            surface: '#17191E',
+                            card: '#1F222A',
+                            border: '#2E323D',
+                            orange: '#FF5500',
+                            orangeHover: '#FF6A1A',
+                            orangeGlow: 'rgba(255, 85, 0, 0.25)',
+                            textMuted: '#8E95A5',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Custom Scrollbars & Theme Animations */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0F1013;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #2E323D;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #FF5500;
+        }
+        
+        .glow-orange {
+            box-shadow: 0 0 20px rgba(255, 85, 0, 0.3);
+        }
+        .glow-orange-sm {
+            box-shadow: 0 0 10px rgba(255, 85, 0, 0.2);
+        }
+        
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.6; }
+        }
+        .animate-pulse-glow {
+            animation: pulseGlow 4s infinite ease-in-out;
+        }
+
+        .glass-panel {
+            background: rgba(23, 25, 30, 0.88);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        /* Range slider styling */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            background: #2E323D;
+            height: 4px;
+            border-radius: 2px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 12px;
+            width: 12px;
+            border-radius: 50%;
+            background: #FF5500;
+            margin-top: -4px;
+            box-shadow: 0 0 8px rgba(255, 85, 0, 0.8);
+        }
+    </style>
+</head>
+<body class="bg-tp-bg text-white font-sans antialiased select-none overflow-hidden h-screen flex flex-col justify-between">
+
+    <!-- TOP HEADER -->
+    <header class="h-14 px-4 pt-2 flex items-center justify-between border-b border-tp-border/40 bg-tp-surface/60 backdrop-blur-md z-30">
+        <div class="flex items-center space-x-2">
+            <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-tp-orange to-orange-400 flex items-center justify-center font-black text-black text-xs shadow-lg shadow-tp-orange/30">
+                <i class="fa-solid fa-robot"></i>
+            </div>
+            <div>
+                <h1 class="text-xs font-extrabold tracking-wider text-white uppercase font-mono flex items-center gap-1.5">
+                    TECHNOBOT <span class="bg-tp-orange/20 text-tp-orange px-1.5 py-0.5 rounded text-[9px] border border-tp-orange/30">v26.3</span>
+                </h1>
+                <p class="text-[10px] text-tp-textMuted tracking-tight">Technopark Music Engine</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <button id="tgSyncBtn" class="text-tp-textMuted hover:text-tp-orange text-xs flex items-center gap-1.5 bg-tp-card px-2.5 py-1.5 rounded-full border border-tp-border transition">
+                <i class="fa-brands fa-telegram text-tp-orange"></i>
+                <span id="userInfo" class="font-medium text-[11px]">Пользователь</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN SCROLLABLE CONTENT AREA -->
+    <main id="mainContainer" class="flex-1 overflow-y-auto pb-32 px-4 pt-4 space-y-6">
+
+        <!-- SCREEN 1: HOME (ГЛАВНАЯ) -->
+        <section id="screen-home" class="space-y-6">
+            <!-- Hero Banner -->
+            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-tp-card via-tp-surface to-black p-5 border border-tp-border glow-orange-sm">
+                <div class="absolute -right-6 -bottom-6 w-32 h-32 bg-tp-orange/15 rounded-full blur-2xl animate-pulse-glow"></div>
+                <div class="relative z-10 space-y-2">
+                    <span class="text-[10px] uppercase font-mono tracking-widest text-tp-orange bg-tp-orange/10 px-2 py-0.5 rounded border border-tp-orange/20">Официальный Бот</span>
+                    <h2 class="text-xl font-bold leading-tight">TechnoBot Stream</h2>
+                    <p class="text-xs text-tp-textMuted max-w-[85%]">Мощный аудиостриминг, быстрый поиск и кэширование в фирменном стиле Технопарк.</p>
+                    <div class="pt-2 flex items-center gap-2">
+                        <button onclick="playTrack(0)" class="bg-tp-orange hover:bg-tp-orangeHover text-black font-semibold text-xs px-4 py-2 rounded-xl flex items-center gap-2 transition shadow-md shadow-tp-orange/30">
+                            <i class="fa-solid fa-play text-xs"></i> Включить Микс
+                        </button>
+                        <button onclick="switchTab('charts')" class="bg-tp-card border border-tp-border text-white text-xs px-3 py-2 rounded-xl hover:border-tp-orange transition">
+                            Топ Чарты
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Category Tags -->
+            <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                <button onclick="filterGenre('all')" class="genre-btn active bg-tp-orange text-black font-medium text-xs px-3.5 py-1.5 rounded-full shrink-0 transition">Все</button>
+                <button onclick="filterGenre('techno')" class="genre-btn bg-tp-card border border-tp-border text-tp-textMuted font-medium text-xs px-3.5 py-1.5 rounded-full shrink-0 transition hover:text-white">Кибер Техно</button>
+                <button onclick="filterGenre('house')" class="genre-btn bg-tp-card border border-tp-border text-tp-textMuted font-medium text-xs px-3.5 py-1.5 rounded-full shrink-0 transition hover:text-white">Deep House</button>
+                <button onclick="filterGenre('phonk')" class="genre-btn bg-tp-card border border-tp-border text-tp-textMuted font-medium text-xs px-3.5 py-1.5 rounded-full shrink-0 transition hover:text-white">Phonk & Drift</button>
+                <button onclick="filterGenre('synth')" class="genre-btn bg-tp-card border border-tp-border text-tp-textMuted font-medium text-xs px-3.5 py-1.5 rounded-full shrink-0 transition hover:text-white">Synthwave</button>
+            </div>
+
+            <!-- Recommended Tracks Section -->
+            <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-bolt text-tp-orange text-xs"></i> Рекомендации TechnoBot
+                    </h3>
+                    <span class="text-[11px] text-tp-textMuted">Сегодня</span>
+                </div>
+
+                <div id="homeTracksList" class="space-y-2">
+                    <!-- Populated via JS -->
+                </div>
+            </div>
+
+            <!-- Featured Playlists -->
+            <div class="space-y-3">
+                <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-compact-disc text-tp-orange text-xs"></i> Спецподборки
+                </h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <div onclick="playGenreSet('techno')" class="p-3 bg-tp-card rounded-xl border border-tp-border/60 hover:border-tp-orange/50 transition cursor-pointer group">
+                        <div class="aspect-square w-full rounded-lg bg-gradient-to-br from-orange-600 via-stone-900 to-black p-3 flex flex-col justify-end relative overflow-hidden mb-2">
+                            <i class="fa-solid fa-microchip text-4xl text-white/10 absolute right-2 top-2"></i>
+                            <span class="text-xs font-extrabold text-white">ТЕХНОРЕЙВ</span>
+                            <span class="text-[10px] text-tp-orange font-mono">140 BPM</span>
+                        </div>
+                        <p class="text-xs font-semibold truncate group-hover:text-tp-orange">Технопарк Индастриал</p>
+                        <p class="text-[10px] text-tp-textMuted">Мощный басс & синт</p>
+                    </div>
+
+                    <div onclick="playGenreSet('phonk')" class="p-3 bg-tp-card rounded-xl border border-tp-border/60 hover:border-tp-orange/50 transition cursor-pointer group">
+                        <div class="aspect-square w-full rounded-lg bg-gradient-to-br from-zinc-800 via-neutral-900 to-orange-950 p-3 flex flex-col justify-end relative overflow-hidden mb-2">
+                            <i class="fa-solid fa-car text-4xl text-white/10 absolute right-2 top-2"></i>
+                            <span class="text-xs font-extrabold text-white">НОЧНОЙ ДРИФТ</span>
+                            <span class="text-[10px] text-tp-orange font-mono">Phonk Vibes</span>
+                        </div>
+                        <p class="text-xs font-semibold truncate group-hover:text-tp-orange">Кибер Дрифт 2026</p>
+                        <p class="text-[10px] text-tp-textMuted">Для ночных поездок</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SCREEN 2: SEARCH (ПОИСК) -->
+        <section id="screen-search" class="hidden space-y-5">
+            <div class="relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-tp-textMuted text-sm"></i>
+                <input type="text" id="searchInput" oninput="handleSearch()" placeholder="Поиск артиста, трека или жанра..." 
+                       class="w-full bg-tp-card border border-tp-border focus:border-tp-orange text-white text-xs rounded-xl pl-10 pr-10 py-3 outline-none transition placeholder-tp-textMuted">
+                <button id="clearSearchBtn" onclick="clearSearch()" class="hidden absolute right-3 top-3 text-tp-textMuted hover:text-white">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <!-- Fast Search Tag Chips -->
+            <div class="space-y-2">
+                <p class="text-[11px] font-mono uppercase text-tp-textMuted tracking-wider">Быстрый поиск</p>
+                <div class="flex flex-wrap gap-2">
+                    <span onclick="setSearchQuery('Cyberpunk')" class="px-3 py-1.5 rounded-lg bg-tp-card border border-tp-border text-xs text-tp-textMuted hover:text-tp-orange hover:border-tp-orange/50 transition cursor-pointer">#Cyberpunk</span>
+                    <span onclick="setSearchQuery('Industrial')" class="px-3 py-1.5 rounded-lg bg-tp-card border border-tp-border text-xs text-tp-textMuted hover:text-tp-orange hover:border-tp-orange/50 transition cursor-pointer">#Industrial</span>
+                    <span onclick="setSearchQuery('Synthwave')" class="px-3 py-1.5 rounded-lg bg-tp-card border border-tp-border text-xs text-tp-textMuted hover:text-tp-orange hover:border-tp-orange/50 transition cursor-pointer">#Synthwave</span>
+                    <span onclick="setSearchQuery('Bass')" class="px-3 py-1.5 rounded-lg bg-tp-card border border-tp-border text-xs text-tp-textMuted hover:text-tp-orange hover:border-tp-orange/50 transition cursor-pointer">#Bass</span>
+                </div>
+            </div>
+
+            <!-- Search Results -->
+            <div class="space-y-3">
+                <h3 class="text-xs font-mono uppercase text-tp-textMuted tracking-wider">Результаты</h3>
+                <div id="searchResultsList" class="space-y-2">
+                    <!-- Dynamic Search items -->
+                </div>
+            </div>
+        </section>
+
+        <!-- SCREEN 3: LIBRARY (МЕДИАТЕКА) -->
+        <section id="screen-library" class="hidden space-y-5">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-bold">Моя Медиатека</h2>
+                <button onclick="createNewPlaylistModal()" class="text-xs bg-tp-orange/10 text-tp-orange border border-tp-orange/30 px-3 py-1.5 rounded-lg hover:bg-tp-orange hover:text-black transition">
+                    + Новый плейлист
+                </button>
+            </div>
+
+            <div class="flex border-b border-tp-border">
+                <button onclick="switchLibraryTab('liked')" id="libTabLiked" class="px-4 py-2 text-xs font-semibold border-b-2 border-tp-orange text-tp-orange">Любимое</button>
+                <button onclick="switchLibraryTab('playlists')" id="libTabPlaylists" class="px-4 py-2 text-xs font-semibold text-tp-textMuted hover:text-white">Плейлисты</button>
+                <button onclick="switchLibraryTab('downloaded')" id="libTabDownloaded" class="px-4 py-2 text-xs font-semibold text-tp-textMuted hover:text-white">Загруженное</button>
+            </div>
+
+            <div id="libraryContent" class="space-y-2">
+                <!-- Dynamic Content for Library -->
+            </div>
+        </section>
+
+        <!-- SCREEN 4: CHARTS (ЧАРТЫ) -->
+        <section id="screen-charts" class="hidden space-y-5">
+            <div class="p-4 bg-gradient-to-r from-orange-950/40 via-tp-card to-tp-surface rounded-2xl border border-tp-orange/30 flex justify-between items-center">
+                <div>
+                    <h2 class="text-base font-extrabold text-white">TechnoBot Топ 10</h2>
+                    <p class="text-xs text-tp-textMuted">Популярные треки недели</p>
+                </div>
+                <div class="w-10 h-10 rounded-full bg-tp-orange/20 border border-tp-orange flex items-center justify-center text-tp-orange">
+                    <i class="fa-solid fa-ranking-star"></i>
+                </div>
+            </div>
+
+            <div id="chartsList" class="space-y-2">
+                <!-- Top Charts dynamic generation -->
+            </div>
+        </section>
+
+    </main>
+
+    <!-- STICKY MINI PLAYER -->
+    <div id="miniPlayer" class="fixed bottom-16 left-2 right-2 glass-panel border border-tp-border rounded-2xl p-2.5 flex items-center justify-between shadow-2xl z-40 transition-all transform translate-y-0">
+        <div onclick="expandPlayer()" class="flex items-center space-x-3 flex-1 min-w-0 cursor-pointer">
+            <div class="relative w-11 h-11 shrink-0">
+                <img id="miniCover" src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80" 
+                     class="w-full h-full object-cover rounded-xl border border-tp-border">
+            </div>
+            <div class="min-w-0 flex-1">
+                <p id="miniTitle" class="text-xs font-bold text-white truncate">Загрузка...</p>
+                <p id="miniArtist" class="text-[11px] text-tp-textMuted truncate">TechnoBot Engine</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-2 pl-2">
+            <button onclick="toggleLikeCurrentTrack()" class="text-tp-textMuted hover:text-tp-orange p-2 transition">
+                <i id="miniLikeBtn" class="fa-regular fa-heart text-base"></i>
+            </button>
+            <button onclick="togglePlay()" class="w-9 h-9 rounded-full bg-tp-orange text-black flex items-center justify-center shadow-lg shadow-tp-orange/20 hover:scale-105 active:scale-95 transition">
+                <i id="miniPlayIcon" class="fa-solid fa-play text-xs ml-0.5"></i>
+            </button>
+            <button onclick="playNext()" class="text-tp-textMuted hover:text-white p-2 transition">
+                <i class="fa-solid fa-forward-step text-sm"></i>
+            </button>
+        </div>
+
+        <div class="absolute top-0 left-3 right-3 h-[2px] bg-tp-border rounded-full overflow-hidden">
+            <div id="miniProgressBar" class="h-full bg-tp-orange w-0 transition-all duration-300"></div>
+        </div>
+    </div>
+
+    <!-- FULL SCREEN PLAYER MODAL -->
+    <div id="fullPlayer" class="fixed inset-0 bg-tp-bg/95 backdrop-blur-2xl z-50 flex flex-col justify-between p-6 transition-transform duration-300 transform translate-y-full">
+        <!-- Top bar -->
+        <div class="flex items-center justify-between">
+            <button onclick="collapsePlayer()" class="w-10 h-10 rounded-full bg-tp-card border border-tp-border flex items-center justify-center text-tp-textMuted hover:text-white">
+                <i class="fa-solid fa-chevron-down"></i>
+            </button>
+            <div class="text-center">
+                <p class="text-[10px] font-mono text-tp-orange uppercase tracking-widest">Сейчас играет</p>
+                <p class="text-xs font-semibold text-tp-textMuted">TechnoBot Audio Stream</p>
+            </div>
+            <button onclick="showPlaylistModal()" class="w-10 h-10 rounded-full bg-tp-card border border-tp-border flex items-center justify-center text-tp-textMuted hover:text-white">
+                <i class="fa-solid fa-list-ul"></i>
+            </button>
+        </div>
+
+        <!-- Cover Art -->
+        <div class="my-auto flex flex-col items-center justify-center py-6">
+            <div class="relative w-64 h-64 sm:w-72 sm:h-72">
+                <div class="absolute inset-0 bg-tp-orange/20 rounded-full blur-2xl"></div>
+                <img id="fullCover" src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80" 
+                     class="w-full h-full object-cover rounded-2xl border-2 border-tp-border shadow-2xl relative z-10 transition-transform duration-500">
+            </div>
+        </div>
+
+        <!-- Track Info & Actions -->
+        <div class="space-y-6">
+            <div class="flex items-center justify-between">
+                <div class="min-w-0 flex-1 pr-4">
+                    <h2 id="fullTitle" class="text-xl font-extrabold text-white truncate">Название Трека</h2>
+                    <p id="fullArtist" class="text-sm text-tp-textMuted truncate mt-0.5">Исполнитель</p>
+                </div>
+                <button onclick="toggleLikeCurrentTrack()" class="w-12 h-12 rounded-full bg-tp-card border border-tp-border flex items-center justify-center text-tp-textMuted hover:text-tp-orange transition">
+                    <i id="fullLikeBtn" class="fa-regular fa-heart text-xl"></i>
+                </button>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="space-y-1.5">
+                <input type="range" id="fullSeek" value="0" min="0" max="100" class="w-full" oninput="seekAudio(this.value)">
+                <div class="flex justify-between text-[11px] font-mono text-tp-textMuted">
+                    <span id="currentTimeText">0:00</span>
+                    <span id="durationTimeText">0:00</span>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="flex items-center justify-between pt-2">
+                <button id="shuffleBtn" onclick="toggleShuffle()" class="text-tp-textMuted hover:text-tp-orange transition">
+                    <i class="fa-solid fa-shuffle text-lg"></i>
+                </button>
+                <button onclick="playPrev()" class="text-white hover:text-tp-orange text-2xl transition">
+                    <i class="fa-solid fa-backward-step"></i>
+                </button>
+                <button onclick="togglePlay()" class="w-16 h-16 rounded-full bg-tp-orange text-black flex items-center justify-center shadow-xl shadow-tp-orange/30 hover:scale-105 active:scale-95 transition">
+                    <i id="fullPlayIcon" class="fa-solid fa-play text-xl ml-1"></i>
+                </button>
+                <button onclick="playNext()" class="text-white hover:text-tp-orange text-2xl transition">
+                    <i class="fa-solid fa-forward-step"></i>
+                </button>
+                <button id="repeatBtn" onclick="toggleRepeat()" class="text-tp-textMuted hover:text-tp-orange transition">
+                    <i class="fa-solid fa-repeat text-lg"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- BOTTOM NAVIGATION BAR -->
+    <nav class="h-16 bg-tp-surface border-t border-tp-border flex items-center justify-around px-2 z-40 relative">
+        <button onclick="switchTab('home')" id="nav-home" class="nav-item flex flex-col items-center justify-center w-16 py-1 text-tp-orange">
+            <i class="fa-solid fa-house text-lg"></i>
+            <span class="text-[10px] mt-1 font-medium">Главная</span>
+        </button>
+        <button onclick="switchTab('search')" id="nav-search" class="nav-item flex flex-col items-center justify-center w-16 py-1 text-tp-textMuted hover:text-white">
+            <i class="fa-solid fa-magnifying-glass text-lg"></i>
+            <span class="text-[10px] mt-1 font-medium">Поиск</span>
+        </button>
+        <button onclick="switchTab('library')" id="nav-library" class="nav-item flex flex-col items-center justify-center w-16 py-1 text-tp-textMuted hover:text-white">
+            <i class="fa-solid fa-book-bookmark text-lg"></i>
+            <span class="text-[10px] mt-1 font-medium">Медиатека</span>
+        </button>
+        <button onclick="switchTab('charts')" id="nav-charts" class="nav-item flex flex-col items-center justify-center w-16 py-1 text-tp-textMuted hover:text-white">
+            <i class="fa-solid fa-chart-simple text-lg"></i>
+            <span class="text-[10px] mt-1 font-medium">Чарт</span>
+        </button>
+    </nav>
+
+    <!-- APPLICATION LOGIC -->
+    <script>
+        const tg = window.Telegram ? window.Telegram.WebApp : null;
+        if (tg) {
+            tg.ready();
+            tg.expand();
+            tg.setHeaderColor('#0F1013');
+            tg.setBackgroundColor('#0F1013');
+            
+            if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                document.getElementById('userInfo').innerText = tg.initDataUnsafe.user.first_name || 'Пользователь';
+            }
+        }
+
+        const TRACK_CATALOG = [
+            {
+                id: '1',
+                title: 'Cyberpunk Industrial Overdrive',
+                artist: 'TechnoBot Sound',
+                genre: 'techno',
+                duration: '2:15',
+                cover: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=80',
+                streamUrl: 'https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8c8a7321d.mp3?filename=cyberpunk-2099-10701.mp3'
+            },
+            {
+                id: '2',
+                title: 'Neon Night Drift',
+                artist: 'Kira Phonk',
+                genre: 'phonk',
+                duration: '1:58',
+                cover: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=400&auto=format&fit=crop&q=80',
+                streamUrl: 'https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=action-electro-sport-111874.mp3'
+            },
+            {
+                id: '3',
+                title: 'Deep House Voltage',
+                artist: 'Electro Pulse',
+                genre: 'house',
+                duration: '2:40',
+                cover: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400&auto=format&fit=crop&q=80',
+                streamUrl: 'https://cdn.pixabay.com/download/audio/2022/10/14/audio_9939f7a552.mp3?filename=deep-techno-122851.mp3'
+            },
+            {
+                id: '4',
+                title: 'Synthwave 2088',
+                artist: 'Retro Horizon',
+                genre: 'synth',
+                duration: '3:05',
+                cover: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=400&auto=format&fit=crop&q=80',
+                streamUrl: 'https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0a13f69d2.mp3?filename=synthwave-80s-110045.mp3'
+            },
+            {
+                id: '5',
+                title: 'TechnoBot Underground Rave',
+                artist: 'DJ TechnoBot',
+                genre: 'techno',
+                duration: '2:22',
+                cover: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=400&auto=format&fit=crop&q=80',
+                streamUrl: 'https://cdn.pixabay.com/download/audio/2022/03/10/audio_c3954c2598.mp3?filename=energetic-hip-hop-8303.mp3'
+            }
+        ];
+
+        let currentPlaylist = [...TRACK_CATALOG];
+        let currentTrackIndex = 0;
+        let isPlaying = false;
+        let likedTrackIds = new Set(['1', '3']);
+        let isShuffle = false;
+        let isRepeat = false;
+
+        const audio = new Audio();
+        audio.src = currentPlaylist[0].streamUrl;
+
+        window.addEventListener('DOMContentLoaded', () => {
+            renderHomeTracks(TRACK_CATALOG);
+            renderChartsTracks();
+            renderSearchResults(TRACK_CATALOG);
+            renderLibrary();
+            updatePlayerUI();
+
+            audio.addEventListener('timeupdate', updateProgress);
+            audio.addEventListener('ended', onTrackEnded);
+        });
+
+        function switchTab(tabId) {
+            ['home', 'search', 'library', 'charts'].forEach(id => {
+                document.getElementById(`screen-${id}`).classList.add('hidden');
+                const navBtn = document.getElementById(`nav-${id}`);
+                navBtn.classList.remove('text-tp-orange');
+                navBtn.classList.add('text-tp-textMuted');
+            });
+
+            document.getElementById(`screen-${tabId}`).classList.remove('hidden');
+            const activeNav = document.getElementById(`nav-${tabId}`);
+            activeNav.classList.add('text-tp-orange');
+            activeNav.classList.remove('text-tp-textMuted');
+        }
+
+        function renderHomeTracks(tracks) {
+            const container = document.getElementById('homeTracksList');
+            container.innerHTML = tracks.map((track) => `
+                <div onclick="playTrackById('${track.id}')" class="flex items-center justify-between p-2.5 bg-tp-card rounded-xl border border-tp-border/40 hover:border-tp-orange/40 transition cursor-pointer group">
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <img src="${track.cover}" class="w-11 h-11 object-cover rounded-lg border border-tp-border shrink-0">
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold text-white truncate group-hover:text-tp-orange transition">${track.title}</p>
+                            <p class="text-[11px] text-tp-textMuted truncate">${track.artist}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <span class="text-[10px] font-mono text-tp-textMuted">${track.duration}</span>
+                        <button onclick="event.stopPropagation(); toggleLike('${track.id}')" class="text-tp-textMuted hover:text-tp-orange p-1">
+                            <i class="${likedTrackIds.has(track.id) ? 'fa-solid fa-heart text-tp-orange' : 'fa-regular fa-heart'}"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderChartsTracks() {
+            const container = document.getElementById('chartsList');
+            container.innerHTML = TRACK_CATALOG.map((track, idx) => `
+                <div onclick="playTrackById('${track.id}')" class="flex items-center justify-between p-3 bg-tp-card rounded-xl border border-tp-border/50 hover:border-tp-orange/50 transition cursor-pointer">
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <span class="text-xs font-mono font-bold w-5 text-center ${idx < 3 ? 'text-tp-orange font-extrabold' : 'text-tp-textMuted'}">#${idx + 1}</span>
+                        <img src="${track.cover}" class="w-11 h-11 object-cover rounded-lg border border-tp-border shrink-0">
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold text-white truncate">${track.title}</p>
+                            <p class="text-[11px] text-tp-textMuted truncate">${track.artist}</p>
+                        </div>
+                    </div>
+                    <button class="w-8 h-8 rounded-full bg-tp-surface border border-tp-border flex items-center justify-center text-tp-orange">
+                        <i class="fa-solid fa-play text-xs"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function renderSearchResults(tracks) {
+            const container = document.getElementById('searchResultsList');
+            if (tracks.length === 0) {
+                container.innerHTML = `<p class="text-xs text-tp-textMuted text-center py-6">Ничего не найдено</p>`;
+                return;
+            }
+            container.innerHTML = tracks.map(track => `
+                <div onclick="playTrackById('${track.id}')" class="flex items-center justify-between p-2.5 bg-tp-card rounded-xl border border-tp-border/40 hover:border-tp-orange/40 transition cursor-pointer">
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <img src="${track.cover}" class="w-10 h-10 object-cover rounded-lg border border-tp-border shrink-0">
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold text-white truncate">${track.title}</p>
+                            <p class="text-[11px] text-tp-textMuted truncate">${track.artist}</p>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-play text-xs text-tp-orange p-2"></i>
+                </div>
+            `).join('');
+        }
+
+        function renderLibrary() {
+            const container = document.getElementById('libraryContent');
+            const likedTracks = TRACK_CATALOG.filter(t => likedTrackIds.has(t.id));
+
+            if (likedTracks.length === 0) {
+                container.innerHTML = `<p class="text-xs text-tp-textMuted text-center py-8">Ваш список любимых треков пуст</p>`;
+                return;
+            }
+
+            container.innerHTML = likedTracks.map(track => `
+                <div onclick="playTrackById('${track.id}')" class="flex items-center justify-between p-2.5 bg-tp-card rounded-xl border border-tp-border/40 hover:border-tp-orange/40 transition cursor-pointer">
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <img src="${track.cover}" class="w-11 h-11 object-cover rounded-lg border border-tp-border shrink-0">
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold text-white truncate">${track.title}</p>
+                            <p class="text-[11px] text-tp-textMuted truncate">${track.artist}</p>
+                        </div>
+                    </div>
+                    <button onclick="event.stopPropagation(); toggleLike('${track.id}')" class="text-tp-orange p-2">
+                        <i class="fa-solid fa-heart"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function playTrack(index) {
+            currentTrackIndex = index;
+            const track = currentPlaylist[currentTrackIndex];
+            audio.src = track.streamUrl;
+            audio.play().then(() => {
+                isPlaying = true;
+                updatePlayerUI();
+            }).catch(() => {
+                isPlaying = true;
+                updatePlayerUI();
+            });
+        }
+
+        function playTrackById(id) {
+            const index = currentPlaylist.findIndex(t => t.id === id);
+            if (index !== -1) playTrack(index);
+        }
+
+        function togglePlay() {
+            if (isPlaying) {
+                audio.pause();
+                isPlaying = false;
+            } else {
+                audio.play();
+                isPlaying = true;
+            }
+            updatePlayerUI();
+        }
+
+        function playNext() {
+            if (isShuffle) {
+                currentTrackIndex = Math.floor(Math.random() * currentPlaylist.length);
+            } else {
+                currentTrackIndex = (currentTrackIndex + 1) % currentPlaylist.length;
+            }
+            playTrack(currentTrackIndex);
+        }
+
+        function playPrev() {
+            currentTrackIndex = (currentTrackIndex - 1 + currentPlaylist.length) % currentPlaylist.length;
+            playTrack(currentTrackIndex);
+        }
+
+        function updatePlayerUI() {
+            const track = currentPlaylist[currentTrackIndex];
+            
+            document.getElementById('miniTitle').innerText = track.title;
+            document.getElementById('miniArtist').innerText = track.artist;
+            document.getElementById('miniCover').src = track.cover;
+            document.getElementById('miniPlayIcon').className = isPlaying ? "fa-solid fa-pause text-xs" : "fa-solid fa-play text-xs ml-0.5";
+
+            document.getElementById('fullTitle').innerText = track.title;
+            document.getElementById('fullArtist').innerText = track.artist;
+            document.getElementById('fullCover').src = track.cover;
+            document.getElementById('fullPlayIcon').className = isPlaying ? "fa-solid fa-pause text-xl" : "fa-solid fa-play text-xl ml-1";
+
+            const isLiked = likedTrackIds.has(track.id);
+            document.getElementById('miniLikeBtn').className = isLiked ? "fa-solid fa-heart text-tp-orange" : "fa-regular fa-heart";
+            document.getElementById('fullLikeBtn').className = isLiked ? "fa-solid fa-heart text-tp-orange" : "fa-regular fa-heart";
+        }
+
+        function updateProgress() {
+            if (!audio.duration) return;
+            const percentage = (audio.currentTime / audio.duration) * 100;
+            document.getElementById('miniProgressBar').style.width = `${percentage}%`;
+            document.getElementById('fullSeek').value = percentage;
+            document.getElementById('currentTimeText').innerText = formatTime(audio.currentTime);
+            document.getElementById('durationTimeText').innerText = formatTime(audio.duration);
+        }
+
+        function seekAudio(val) {
+            if (audio.duration) {
+                audio.currentTime = (val / 100) * audio.duration;
+            }
+        }
+
+        function formatTime(seconds) {
+            const min = Math.floor(seconds / 60);
+            const sec = Math.floor(seconds % 60);
+            return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+        }
+
+        function onTrackEnded() {
+            if (isRepeat) playTrack(currentTrackIndex);
+            else playNext();
+        }
+
+        function toggleLike(trackId) {
+            if (likedTrackIds.has(trackId)) likedTrackIds.delete(trackId);
+            else likedTrackIds.add(trackId);
+            renderHomeTracks(TRACK_CATALOG);
+            renderLibrary();
+            updatePlayerUI();
+        }
+
+        function toggleLikeCurrentTrack() {
+            toggleLike(currentPlaylist[currentTrackIndex].id);
+        }
+
+        function toggleShuffle() {
+            isShuffle = !isShuffle;
+            document.getElementById('shuffleBtn').classList.toggle('text-tp-orange', isShuffle);
+        }
+
+        function toggleRepeat() {
+            isRepeat = !isRepeat;
+            document.getElementById('repeatBtn').classList.toggle('text-tp-orange', isRepeat);
+        }
+
+        function handleSearch() {
+            const q = document.getElementById('searchInput').value.toLowerCase().trim();
+            document.getElementById('clearSearchBtn').classList.toggle('hidden', q.length === 0);
+            const filtered = TRACK_CATALOG.filter(t => 
+                t.title.toLowerCase().includes(q) || 
+                t.artist.toLowerCase().includes(q) ||
+                t.genre.toLowerCase().includes(q)
+            );
+            renderSearchResults(filtered);
+        }
+
+        function setSearchQuery(query) {
+            document.getElementById('searchInput').value = query;
+            handleSearch();
+        }
+
+        function clearSearch() {
+            document.getElementById('searchInput').value = '';
+            handleSearch();
+        }
+
+        function filterGenre(genre) {
+            document.querySelectorAll('.genre-btn').forEach(btn => {
+                btn.classList.remove('bg-tp-orange', 'text-black');
+                btn.classList.add('bg-tp-card', 'text-tp-textMuted');
+            });
+            event.target.classList.add('bg-tp-orange', 'text-black');
+            
+            if (genre === 'all') renderHomeTracks(TRACK_CATALOG);
+            else renderHomeTracks(TRACK_CATALOG.filter(t => t.genre === genre));
+        }
+
+        function playGenreSet(genre) {
+            const filtered = TRACK_CATALOG.filter(t => t.genre === genre);
+            if (filtered.length > 0) {
+                currentPlaylist = filtered;
+                playTrack(0);
+            }
+        }
+
+        function expandPlayer() {
+            document.getElementById('fullPlayer').classList.remove('translate-y-full');
+        }
+
+        function collapsePlayer() {
+            document.getElementById('fullPlayer').classList.add('translate-y-full');
+        }
+
+        function switchLibraryTab(tab) {
+            ['liked', 'playlists', 'downloaded'].forEach(t => {
+                const el = document.getElementById(`libTab${t.charAt(0).toUpperCase() + t.slice(1)}`);
+                if (el) el.className = "px-4 py-2 text-xs font-semibold text-tp-textMuted hover:text-white";
+            });
+            const active = document.getElementById(`libTab${tab.charAt(0).toUpperCase() + tab.slice(1)}`);
+            if (active) active.className = "px-4 py-2 text-xs font-semibold border-b-2 border-tp-orange text-tp-orange";
+            renderLibrary();
+        }
+
+        function createNewPlaylistModal() {
+            if (tg) tg.showAlert("Создание плейлистов будет синхронизировано с Вашим профилем Telegram.");
+        }
+
+        function showPlaylistModal() {
+            collapsePlayer();
+            switchTab('library');
+        }
+    </script>
+</body>
+</html>
