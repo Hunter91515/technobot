@@ -221,13 +221,12 @@
             }
         }
 
-        const BACKEND_URL =  "https://technobot-player.loca.lt";
+        const BACKEND_URL = "https://technobot-player.loca.lt";
         const audio = new Audio();
         let isPlaying = false;
         let currentTrack = null;
         let searchTimeout = null;
 
-        // Сохранение данных в localStorage
         let favorites = JSON.parse(localStorage.getItem('tp_favorites') || '[]');
         let recentTracks = JSON.parse(localStorage.getItem('tp_recent') || '[]');
 
@@ -239,7 +238,6 @@
             audio.addEventListener('ended', () => { isPlaying = false; updatePlayerUI(); });
         });
 
-        // Живой поиск при вводе текста
         function onSearchInput(val) {
             document.getElementById('clearSearchBtn').classList.toggle('hidden', !val);
             clearTimeout(searchTimeout);
@@ -265,7 +263,6 @@
             }, 300);
         }
 
-        // Отрисовка найденных вариантов
         function renderSearchSuggestions(tracks) {
             const list = document.getElementById('searchResultsList');
             if (!tracks || tracks.length === 0) {
@@ -288,10 +285,9 @@
             `).join('');
         }
 
-        // Выбор трека -> Скачивание с ПК -> Старт воспроизведения
         async function selectAndPlayTrack(title, artist, cover, query) {
             const statusEl = document.getElementById('searchStatus');
-            statusEl.innerText = `🛰 Загружаем «${title}» с ПК...`;
+            statusEl.innerText = `⏳ Загружаем «${title}» с ПК...`;
 
             currentTrack = { title, artist, cover, streamUrl: '' };
             updatePlayerUI();
@@ -303,16 +299,24 @@
                 const data = await res.json();
 
                 if (data.status === "success") {
-                    statusEl.innerText = "✅ Трек готов!";
+                    statusEl.innerText = "🚀 Скачиваем аудиопоток...";
                     const fullAudioUrl = `${BACKEND_URL}${data.audio_url}`;
-                    currentTrack.streamUrl = fullAudioUrl;
+                    
+                    // Скачиваем через fetch с заголовком обхода localtunnel, чтобы обойти блокировку
+                    const audioRes = await fetch(fullAudioUrl, {
+                        headers: { "Bypass-Tunnel-Reminder": "true" }
+                    });
+                    const audioBlob = await audioRes.blob();
+                    const blobUrl = URL.createObjectURL(audioBlob);
 
-                    audio.src = fullAudioUrl;
+                    currentTrack.streamUrl = blobUrl;
+
+                    statusEl.innerText = "🎵 Трек готов!";
+                    audio.src = blobUrl;
                     audio.play();
                     isPlaying = true;
                     updatePlayerUI();
 
-                    // Добавляем в недавние
                     saveToRecent(currentTrack);
                 } else {
                     statusEl.innerText = "❌ Не удалось скачать трек";
