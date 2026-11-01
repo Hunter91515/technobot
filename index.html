@@ -288,7 +288,7 @@
             `).join('');
         }
 
-                       async function selectAndPlayTrack(title, artist, cover, query) {
+                               async function selectAndPlayTrack(title, artist, cover, query) {
             const statusEl = document.getElementById('searchStatus');
             statusEl.innerText = `⏳ Загрузка «${title}»...`;
 
@@ -296,37 +296,36 @@
             updatePlayerUI();
 
             try {
-                const res = await fetch(`${BACKEND_URL}/api/play?query=${encodeURIComponent(query)}`, {
+                const res = fcv = await fetch(`${BACKEND_URL}/api/play?query=${encodeURIComponent(query)}`, {
                     headers: { "ngrok-skip-browser-warning": "true" }
                 });
                 const data = await res.json();
 
                 if (data.status === "success" && data.audio_url) {
-                    // Передаем ссылку на прокси
-                    audio.src = `${BACKEND_URL}${data.audio_url}`;
+                    // Присваиваем прямую ссылку на аудиопоток
+                    audio.src = data.audio_url;
                     audio.load();
                     
-                    // Безопасный запуск с обработкой блокировки браузера
                     audio.play().then(() => {
                         isPlaying = true;
                         updatePlayerUI();
                         saveToRecent(currentTrack);
-                        statusEl.innerText = `🎵 Воспроизведение запущено`;
+                        statusEl.innerText = `🎵 Воспроизведение заведено`;
                     }).catch(e => {
-                        console.log("Автоплей заблокирован браузером:", e);
+                        console.log("Требуется клик пользователя:", e);
                         isPlaying = false;
                         updatePlayerUI();
-                        // Если браузер заблокировал автоплей, просим нажать кнопку Play внизу
-                        statusEl.innerText = `▶️ Нажмите кнопку Play внизу плеера`;
+                        statusEl.innerText = `▶️ Нажмите Play на панели ниже`;
                     });
                 } else {
                     statusEl.innerText = `❌ Трек не найден`;
                 }
             } catch (e) {
                 console.error(e);
-                statusEl.innerText = `❌ Ошибка соединения с ПК`;
+                statusEl.innerText = `❌ Ошибка связи с сервером`;
             }
         }
+
 
         function togglePlay() {
             if (!currentTrack) return;
